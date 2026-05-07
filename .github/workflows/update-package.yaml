@@ -4,7 +4,27 @@ permissions: {}
 
 # ───────────── TRIGGERS ─────────────
 on:
-  repository_dispatch:
+  workflow_call:
+    inputs:
+      component:
+        description: 'Component'
+        required: true
+        type: string
+      tag:
+        description: "Version / tag (e.g. v1.4.0)"
+        required: true
+        type: string
+      windows_sha:
+        description: "Provide sha256 for Windows binary"
+        required: true
+        type: string
+      push_to_chocolatey:
+        description: "true → push .nupkg"
+        type: boolean
+        default: true
+    secrets:
+      CHOCOLATEY_API_KEY:
+        required: false
 
   workflow_dispatch:
     inputs:
@@ -53,9 +73,9 @@ jobs:
         id: validate
         shell: bash
         env:
-          FULL_TAG: ${{ inputs.tag || github.event.client_payload.tag }}
-          COMPONENT: ${{ inputs.component || github.event.client_payload.component }}
-          WINDOWS_SHA: ${{ inputs.windows_sha || github.event.client_payload.windows_sha }}
+          FULL_TAG: ${{ inputs.tag }}
+          COMPONENT: ${{ inputs.component }}
+          WINDOWS_SHA: ${{ inputs.windows_sha }}
         run: |
           case "$COMPONENT" in
             gardenlogin|gardenctl-v2|diki) ;;
@@ -170,8 +190,7 @@ jobs:
     runs-on: windows-latest
     permissions: {}
     if: ${{ vars[needs.resolve-inputs.outputs.skip_var] != 'true' &&
-            (github.event_name == 'repository_dispatch' ||
-             inputs.push_to_chocolatey) }}
+            inputs.push_to_chocolatey == true }}
 
     env:
       NUM_VERSION: ${{ needs.resolve-inputs.outputs.numeric }}
@@ -197,7 +216,9 @@ jobs:
 # 4) CREATE PR — commit generated files, push branch, open PR
 ##############################################################################
   create-pr:
-    needs: [resolve-inputs, package]
+    needs: [resolve-inputs, package, publish-chocolatey]
+    # Run if publish succeeded or was skipped (dry run), but not if it failed
+    if: ${{ !failure() && !cancelled() }}
     runs-on: windows-latest
     permissions:
       contents: write
